@@ -9,6 +9,15 @@ from tensorflow.keras.utils import to_categorical
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Conv2D, MaxPooling2D, Flatten, Dense, Dropout, BatchNormalization
 
+class Exporter: # 학습된 모델을 모바일/임베디드용 TFLite 파일로 변환
+    @staticmethod
+    def to_tflite(model, path):
+        converter = tf.lite.TFLiteConverter.from_keras_model(model)
+        converter.optimizations = [tf.lite.Optimize.DEFAULT]
+        tflite_model = converter.convert()
+        with open(path, 'wb') as f:
+            f.write(tflite_model)
+        print(f"TFLite 모델이 '{path}'에 저장되었습니다.")
 
 class Distiller: # Teacher 모델의 지식을 Student 모델로 전이하는 지식 증류(knowledge distillation)
     def __init__(self, teacher, student):
@@ -172,4 +181,16 @@ if __name__ == '__main__':
     distiller = Distiller(teacher, student)
     student = distiller.distill(X_train, y_train, X_test, y_test)
     print("Knowledge Distillation 테스트 완료.")
+
+    model = Sequential([
+        Flatten(input_shape=(48, 48, 1)),
+        Dense(7, activation='softmax')
+    ])
+    model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+    # 더미 데이터로 모델 학습 (테스트용)
+    X = np.random.rand(10, 48, 48, 1)
+    y = tf.keras.utils.to_categorical(np.random.randint(0, 7, 10), 7)
+    model.fit(X, y, epochs=1)
+
+    Exporter.to_tflite(model, 'test_emotion.tflite')
     
