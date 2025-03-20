@@ -1,7 +1,46 @@
 import os
 import cv2
 import numpy as np
+import tensorflow as tf
+
 from tensorflow.keras.utils import to_categorical
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Conv2D, MaxPooling2D, Flatten, Dense, Dropout, BatchNormalization
+
+class ModelBuilder: # Hyperband 튜너에서 사용할 CNN 모델을 생성
+    def build(hp):
+        model = Sequential()
+
+        # 3개의 합성곱 레이어 구성 (각 레이어에 하이퍼파라미터 적용)
+        for i, filters in enumerate([
+            hp.Choice('conv1_filters', [32, 64]),
+            hp.Choice('conv2_filters', [64, 128]),
+            hp.Choice('conv3_filters', [128, 256])
+        ]):
+            if i == 0:
+                model.add(Conv2D(filters, (3, 3), activation='relu', input_shape=(48, 48, 1),
+                                 kernel_regularizer=tf.keras.regularizers.l2(
+                                     hp.Choice('l2', [1e-4, 1e-3])
+                                 )))
+            else:
+                model.add(Conv2D(filters, (3, 3), activation='relu',
+                                 kernel_regularizer=tf.keras.regularizers.l2(
+                                     hp.Choice('l2', [1e-4, 1e-3])
+                                 )))
+            model.add(BatchNormalization())
+            model.add(MaxPooling2D(2, 2))
+
+        model.add(Flatten())
+        model.add(Dense(hp.Int('dense_units', 64, 256, step=64), activation='relu'))
+        model.add(Dropout(hp.Choice('dropout_rate', [0.2, 0.3, 0.5])))
+        # 여기서는 감정 개수를 직접 지정 (7개)
+        model.add(Dense(7, activation='softmax'))
+
+        optimizer = tf.keras.optimizers.Adam(
+            hp.Choice('learning_rate', [1e-2, 1e-3, 1e-4])
+        )
+        model.compile(optimizer=optimizer, loss='categorical_crossentropy', metrics=['accuracy'])
+        return model
 
 class DataLoader: # 이미지 파일을 읽어와서 모델 학습용 데이터로 준비
     def __init__(self, emotions):
@@ -43,3 +82,14 @@ if __name__ == '__main__':
         print("데이터 로딩 완료:", X_train.shape, y_train.shape)
     except Exception as e:
         print("데이터 로딩 테스트 중 에러 발생:", e)
+
+    class DummyHP:
+        def Choice(self, name, values):
+            return values[0]
+        def Int(self, name, min_value, max_value, step):
+            return min_value
+
+    dummy_hp = DummyHP()
+    model = ModelBuilder.build(dummy_hp)
+    model.summary()
+    
