@@ -2,11 +2,40 @@ import os
 import cv2
 import numpy as np
 import tensorflow as tf
+import keras_tuner as kt
+import tensorflow_model_optimization as tfmot
 
 from tensorflow.keras.utils import to_categorical
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Conv2D, MaxPooling2D, Flatten, Dense, Dropout, BatchNormalization
 
+class HyperbandTuner: # keras_tuner.Hyperband를 이용하여 최적의 하이퍼파라미터를 탐색하는 클래스
+    def __init__(self):
+        self.tuner = kt.Hyperband(
+            ModelBuilder.build,
+            objective='val_accuracy',
+            max_epochs=3,  # 테스트용으로 에폭 수를 줄임
+            factor=3,
+            directory='kt_dir',
+            project_name='emotion_tuning'
+        )
+
+    def search(self, X_train, y_train, X_test, y_test):
+        prune_cb = tfmot.sparsity.keras.UpdatePruningStep()  # 모델 경량화 업데이트
+        early = tf.keras.callbacks.EarlyStopping('val_accuracy', patience=2, restore_best_weights=True)
+
+        # 튜닝 실행: 최적 모델을 찾기 위한 학습 진행
+        self.tuner.search(
+            X_train, y_train,
+            validation_data=(X_test, y_test),
+            epochs=3,
+            callbacks=[prune_cb, early]
+        )
+
+        best_model = self.tuner.get_best_models()[0]         # 최적 모델
+        best_hp = self.tuner.get_best_hyperparameters()[0]     # 최적 하이퍼파라미터
+        return best_model, best_hp
+    
 class ModelBuilder: # Hyperband 튜너에서 사용할 CNN 모델을 생성
     def build(hp):
         model = Sequential()
@@ -92,4 +121,13 @@ if __name__ == '__main__':
     dummy_hp = DummyHP()
     model = ModelBuilder.build(dummy_hp)
     model.summary()
+
+    X_train = np.random.rand(20, 48, 48, 1)
+    y_train = tf.keras.utils.to_categorical(np.random.randint(0, 7, 20), 7)
+    X_test = np.random.rand(5, 48, 48, 1)
+    y_test = tf.keras.utils.to_categorical(np.random.randint(0, 7, 5), 7)
+
+    tuner = HyperbandTuner()
+    best_model, best_hp = tuner.search(X_train, y_train, X_test, y_test)
+    print("최적 하이퍼파라미터:", best_hp.values)
     
