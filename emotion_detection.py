@@ -4,10 +4,64 @@ import numpy as np
 import tensorflow as tf
 import keras_tuner as kt
 import tensorflow_model_optimization as tfmot
+import mediapipe as mp
+
 
 from tensorflow.keras.utils import to_categorical
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Conv2D, MaxPooling2D, Flatten, Dense, Dropout, BatchNormalization
+from collections import deque, Counter
+
+class EmotionRecognizer: # 웹캠을 이용해 실시간으로 얼굴 감정을 인식, 예측 스무딩을 적용
+    def __init__(self, model, emotions):
+        self.model = model
+        self.emotions = emotions
+        self.history = deque(maxlen=10)  # 최근 10개 예측 기록 저장
+
+    def recognize(self):
+        cap = cv2.VideoCapture(0)  # 웹캠 열기
+        detector = mp.solutions.face_detection.FaceDetection(min_detection_confidence=0.5)
+
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+            # 얼굴 감지를 위해 RGB 변환
+            results = detector.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+            if results.detections:
+                for d in results.detections:
+                    bbox = d.location_data.relative_bounding_box
+                    h, w, _ = frame.shape
+                    x, y, w_box, h_box = (int(bbox.xmin * w), int(bbox.ymin * h),
+                                          int(bbox.width * w), int(bbox.height * h))
+
+                    # 얼굴 영역 추출 및 전처리
+                    face_region = frame[y:y+h_box, x:x+w_box]
+                    if face_region.size == 0:
+                        continue  # 얼굴 영역이 비었으면 넘어감
+                    face = cv2.cvtColor(face_region, cv2.COLOR_BGR2GRAY)
+
+                    face = cv2.cvtColor(frame[y:y+h_box, x:x+w_box], cv2.COLOR_BGR2GRAY)
+                    face = cv2.resize(face, (48, 48)) / 255.0
+                    preds = self.model.predict(face.reshape(1, 48, 48, 1))
+                    idx = np.argmax(preds)
+
+                    # 최근 예측 기록 업데이트 및 스무딩 처리
+                    self.history.append(idx)
+                    emotion = self.emotions[Counter(self.history).most_common(1)[0][0]]
+
+                    # 얼굴 영역에 사각형과 감정 텍스트 표시
+                    cv2.rectangle(frame, (x, y), (x+w_box, y+h_box), (0, 255, 0), 2)
+                    cv2.putText(frame, emotion, (x, y-10),
+                                cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+
+            cv2.imshow('Emotion Detection', frame)
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
+
+        cap.release()
+        cv2.destroyAllWindows()
 
 class Exporter: # 학습된 모델을 모바일/임베디드용 TFLite 파일로 변환
     @staticmethod
@@ -193,4 +247,9 @@ if __name__ == '__main__':
     model.fit(X, y, epochs=1)
 
     Exporter.to_tflite(model, 'test_emotion.tflite')
+
+    emotions = ["angry", "disgust", "fear", "happy", "neutral", "sad", "surprise"]
+    recognizer = EmotionRecognizer(model, emotions)
+    print("실시간 감정 인식 기능을 실행합니다. 종료하려면 'q'를 누르세요.")
+    recognizer.recognize()
     
