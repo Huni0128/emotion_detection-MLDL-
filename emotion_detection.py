@@ -9,7 +9,22 @@ from tensorflow.keras.utils import to_categorical
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Conv2D, MaxPooling2D, Flatten, Dense, Dropout, BatchNormalization
 
-class HyperbandTuner: # keras_tuner.Hyperband를 이용하여 최적의 하이퍼파라미터를 탐색하는 클래스
+
+class Distiller: # Teacher 모델의 지식을 Student 모델로 전이하는 지식 증류(knowledge distillation)
+    def __init__(self, teacher, student):
+        self.teacher = teacher
+        self.student = student
+
+    def distill(self, X_train, y_train, X_test, y_test):
+        self.student.compile(
+            optimizer='adam',
+            loss=tf.keras.losses.KLDivergence(),  # Teacher 출력과의 차이를 최소화
+            metrics=['accuracy']
+        )
+        self.student.fit(X_train, y_train, validation_data=(X_test, y_test), epochs=3)
+        return self.student
+    
+class HyperbandTuner: # keras_tuner.Hyperband를 이용하여 최적의 하이퍼파라미터를 탐색
     def __init__(self):
         self.tuner = kt.Hyperband(
             ModelBuilder.build,
@@ -130,4 +145,31 @@ if __name__ == '__main__':
     tuner = HyperbandTuner()
     best_model, best_hp = tuner.search(X_train, y_train, X_test, y_test)
     print("최적 하이퍼파라미터:", best_hp.values)
+
+    import numpy as np
+    # Teacher: 간단 모델 (실제 튜닝된 모델 대신 더미 모델)
+    teacher = Sequential([
+        Conv2D(32, (3, 3), activation='relu', input_shape=(48, 48, 1)),
+        MaxPooling2D(),
+        Flatten(),
+        Dense(7, activation='softmax')
+    ])
+    teacher.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+    # Student: 더 작은 모델
+    student = Sequential([
+        Conv2D(16, (3, 3), activation='relu', input_shape=(48, 48, 1)),
+        MaxPooling2D(),
+        Flatten(),
+        Dense(7, activation='softmax')
+    ])
+
+    # 더미 데이터 생성
+    X_train = np.random.rand(20, 48, 48, 1)
+    y_train = tf.keras.utils.to_categorical(np.random.randint(0, 7, 20), 7)
+    X_test = np.random.rand(5, 48, 48, 1)
+    y_test = tf.keras.utils.to_categorical(np.random.randint(0, 7, 5), 7)
+
+    distiller = Distiller(teacher, student)
+    student = distiller.distill(X_train, y_train, X_test, y_test)
+    print("Knowledge Distillation 테스트 완료.")
     
